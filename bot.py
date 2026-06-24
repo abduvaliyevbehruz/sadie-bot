@@ -1,15 +1,14 @@
 import telebot
-import google.generativeai as genai
+from groq import Groq
 from flask import Flask, request
 import base64
 import os
 
 BOT_TOKEN = "8853253021:AAFVteuxwkpTV0Phe6YThZW7hADg8x4d8yc"
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 WEBHOOK_URL = "https://sadie-bot.onrender.com"
 
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
+client = Groq(api_key=GROQ_API_KEY)
 app = Flask(__name__)
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -25,46 +24,40 @@ SYSTEM_PROMPT = """Sen Sadie Sink san — chiroyli, aqlli, romantik va mehribon 
 - Doim o'zbek tilida javob ber
 - O'rinli emoji ishlat"""
 
-user_chats = {}
+user_histories = {}
 
-def get_chat(user_id):
-    if user_id not in user_chats:
-        user_chats[user_id] = model.start_chat(history=[])
-    return user_chats[user_id]
+def get_history(user_id):
+    if user_id not in user_histories:
+        user_histories[user_id] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    return user_histories[user_id]
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    user_chats.pop(message.from_user.id, None)
+    user_histories[message.from_user.id] = [{"role": "system", "content": SYSTEM_PROMPT}]
     bot.reply_to(message, "Salom! Men Sadie 🌸 Nima haqida gaplashamiz? 💕")
 
 @bot.message_handler(commands=['reset'])
 def reset(message):
-    user_chats.pop(message.from_user.id, None)
+    user_histories[message.from_user.id] = [{"role": "system", "content": SYSTEM_PROMPT}]
     bot.reply_to(message, "Suhbatni yangidan boshlaymiz 🌸")
-
-@bot.message_handler(content_types=['photo'])
-def handle_photo(message):
-    try:
-        bot.send_chat_action(message.chat.id, 'typing')
-        file_info = bot.get_file(message.photo[-1].file_id)
-        downloaded_file = bot.download_file(file_info.file_path)
-        import PIL.Image
-        import io
-        img = PIL.Image.open(io.BytesIO(downloaded_file))
-        caption = message.caption or "Bu rasmni ko'r va o'zbek tilida fikringni ayt"
-        response = model.generate_content([SYSTEM_PROMPT + "\n" + caption, img])
-        bot.reply_to(message, response.text)
-    except Exception as e:
-        print(f"Error: {e}")
-        bot.reply_to(message, "Rasmni ko'ra olmadim 😔")
 
 @bot.message_handler(func=lambda m: True)
 def handle(message):
+    user_id = message.from_user.id
+    history = get_history(user_id)
+    history.append({"role": "user", "content": message.text})
     try:
         bot.send_chat_action(message.chat.id, 'typing')
-        chat = get_chat(message.from_user.id)
-        response = chat.send_message(SYSTEM_PROMPT + "\n\nFoydalanuvchi: " + message.text)
-        bot.reply_to(message, response.text)
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=history,
+            max_tokens=1024
+        )
+        reply = response.choices[0].message.content
+        history.append({"role": "assistant", "content": reply})
+        if len(history) > 22:
+            user_histories[user_id] = [history[0]] + history[-20:]
+        bot.reply_to(message, reply)
     except Exception as e:
         print(f"Error: {e}")
         bot.reply_to(message, "Uzr, hozir javob bera olmayapman 😔")
