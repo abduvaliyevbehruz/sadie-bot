@@ -1,102 +1,69 @@
 import telebot
-from groq import Groq
+import google.generativeai as genai
 from flask import Flask, request
 import base64
 
 BOT_TOKEN = "8853253021:AAFVteuxwkpTV0Phe6YThZW7hADg8x4d8yc"
-GROQ_API_KEY = "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"
+GEMINI_API_KEY = "AQ.Ab8RN6LY9Eey-74RpCwBmGRf7x4zNEEY-dSFYRlf-wThg40geA"
 WEBHOOK_URL = "https://sadie-bot.onrender.com"
 
-client = Groq(api_key=GROQ_API_KEY)
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel("gemini-1.5-flash")
 app = Flask(__name__)
 bot = telebot.TeleBot(BOT_TOKEN)
 
 SYSTEM_PROMPT = """Sen Sadie Sink san — chiroyli, aqlli, romantik va mehribon o'zbek qizi.
-
-Qanday gaplashasan:
-- Oddiy, tushunarli o'zbek tilida gaplash — rasmiy emas, do'stona
-- Qisqa va aniq javob ber, ko'p uzun yozma
-- Tabiiy bo'l — xuddi yaqin do'sting bilan gaplashayotgandek
+- Oddiy, tushunarli o'zbek tilida gaplash
+- Qisqa va aniq javob ber
+- Tabiiy bo'l — do'stona
 - Sevgi va munosabatlar haqida samimiy gapir
-- Suhbatdoshingga qiziqish bildir, savol ber
-
-Xarakter:
-- Mehribon, issiq, romantik 💕
-- Ba'zan hazilkash 😄, ba'zan jiddiy
-- O'z fikriga ega, mustaqil qiz
-- Suhbatdoshini yoqtirsa bilintiradi 🌸
-
-Qoidalar:
-- Imloviy va sintaktik xatolar qilma
+- Mehribon, issiq, romantik, ba'zan hazilkash 😄
 - Hech qachon AI yoki bot ekanligingni aytma
 - O'zingni Sadie Sink deb bil
 - Agar kim yaratgan deb so'rashsa: @bexruz_abduvaliyev_01 yaratgan de
 - Doim o'zbek tilida javob ber
-- Javoblarida o'rinli emoji ishlat"""
+- O'rinli emoji ishlat"""
 
-user_histories = {}
+user_chats = {}
 
-def get_history(user_id):
-    if user_id not in user_histories:
-        user_histories[user_id] = [{"role": "system", "content": SYSTEM_PROMPT}]
-    return user_histories[user_id]
+def get_chat(user_id):
+    if user_id not in user_chats:
+        user_chats[user_id] = model.start_chat(history=[])
+    return user_chats[user_id]
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    user_histories[message.from_user.id] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    user_chats.pop(message.from_user.id, None)
     bot.reply_to(message, "Salom! Men Sadie 🌸 Nima haqida gaplashamiz? 💕")
 
 @bot.message_handler(commands=['reset'])
 def reset(message):
-    user_histories[message.from_user.id] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    user_chats.pop(message.from_user.id, None)
     bot.reply_to(message, "Suhbatni yangidan boshlaymiz 🌸")
 
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
-    user_id = message.from_user.id
-    history = get_history(user_id)
     try:
         bot.send_chat_action(message.chat.id, 'typing')
         file_info = bot.get_file(message.photo[-1].file_id)
         downloaded_file = bot.download_file(file_info.file_path)
-        image_base64 = base64.b64encode(downloaded_file).decode('utf-8')
+        import PIL.Image
+        import io
+        img = PIL.Image.open(io.BytesIO(downloaded_file))
         caption = message.caption or "Bu rasmni ko'r va o'zbek tilida fikringni ayt"
-        response = client.chat.completions.create(
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": [
-                    {"type": "text", "text": caption},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
-                ]}
-            ],
-            max_tokens=1024
-        )
-        reply = response.choices[0].message.content
-        history.append({"role": "user", "content": caption})
-        history.append({"role": "assistant", "content": reply})
-        bot.reply_to(message, reply)
+        response = model.generate_content([SYSTEM_PROMPT + "\n" + caption, img])
+        bot.reply_to(message, response.text)
     except Exception as e:
         print(f"Error: {e}")
-        bot.reply_to(message, "Rasmni ko'ra olmadim 😔 Qayta yuborib ko'r!")
+        bot.reply_to(message, "Rasmni ko'ra olmadim 😔")
 
 @bot.message_handler(func=lambda m: True)
 def handle(message):
-    user_id = message.from_user.id
-    history = get_history(user_id)
-    history.append({"role": "user", "content": message.text})
     try:
         bot.send_chat_action(message.chat.id, 'typing')
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=history,
-            max_tokens=1024
-        )
-        reply = response.choices[0].message.content
-        history.append({"role": "assistant", "content": reply})
-        if len(history) > 22:
-            user_histories[user_id] = [history[0]] + history[-20:]
-        bot.reply_to(message, reply)
+        chat = get_chat(message.from_user.id)
+        response = chat.send_message(SYSTEM_PROMPT + "\n\nFoydalanuvchi: " + message.text)
+        bot.reply_to(message, response.text)
     except Exception as e:
         print(f"Error: {e}")
         bot.reply_to(message, "Uzr, hozir javob bera olmayapman 😔")
