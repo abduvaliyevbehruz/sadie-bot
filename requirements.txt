@@ -1,3 +1,4 @@
 pyTelegramBotAPI
-groq
+google-generativeai
 flask
+Pillow
