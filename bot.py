@@ -2,9 +2,10 @@ import telebot
 import google.generativeai as genai
 from flask import Flask, request
 import base64
+import os
 
 BOT_TOKEN = "8853253021:AAFVteuxwkpTV0Phe6YThZW7hADg8x4d8yc"
-GEMINI_API_KEY = "AQ.Ab8RN6LY9Eey-74RpCwBmGRf7x4zNEEY-dSFYRlf-wThg40geA"
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 WEBHOOK_URL = "https://sadie-bot.onrender.com"
 
 genai.configure(api_key=GEMINI_API_KEY)
